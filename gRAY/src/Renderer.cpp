@@ -1,6 +1,8 @@
 #include "Renderer.h"
 #include "Walnut/Random.h"
 
+#include <execution>
+
 namespace Utils {
 	static uint32_t ConvertToRGBA(const glm::vec4& color)
 	{
@@ -14,8 +16,7 @@ namespace Utils {
 	}
 }
 
-void Renderer::OnResize(uint32_t width, uint32_t height)
-{
+void Renderer::OnResize(uint32_t width, uint32_t height) {
 	if (m_FinalImage)
 	{
 		if (m_FinalImage->GetWidth() == width && m_FinalImage->GetHeight() == height)
@@ -33,6 +34,15 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
 
 	delete[] m_AccData;
 	m_AccData = new glm::vec4[width * height];
+
+	m_ImageHorizontalIter.resize(width);
+	m_ImageVerticalIter.resize(height);
+
+	for (uint32_t i = 0; i < width; i++)
+		m_ImageHorizontalIter[i] = i;
+
+	for (uint32_t i = 0; i < height; i++)
+		m_ImageVerticalIter[i] = i;
 }
 
 void Renderer::Render(const Scene& scene, const Camera& camera)
@@ -43,6 +53,24 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 	if (m_FrameIndex == 1) {
 		memset(m_AccData, 0, m_FinalImage->GetHeight() * m_FinalImage->GetWidth() * sizeof(glm::vec4));
 	}
+
+#define MT 1
+#if MT
+	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(),
+		[this](uint32_t y) {
+			std::for_each(std::execution::par, m_ImageHorizontalIter.begin(), m_ImageHorizontalIter.end(),
+				[this, y](uint32_t x) {
+					glm::vec4 color = PerPixel(x, y);
+					m_AccData[x + y * m_FinalImage->GetWidth()] += color;
+
+					glm::vec4 AccColor = m_AccData[x + y * m_FinalImage->GetWidth()];
+					AccColor /= (float)m_FrameIndex;
+
+					AccColor = glm::clamp(AccColor, glm::vec4(0.0f), glm::vec4(1.0f));
+					m_ImageData[x + y * m_FinalImage->GetWidth()] = Utils::ConvertToRGBA(AccColor);
+				});
+		});
+#else
 	for (uint32_t y = 0; y < m_FinalImage->GetHeight(); y++)
 	{
 		for (uint32_t x = 0; x < m_FinalImage->GetWidth(); x++)
@@ -57,7 +85,7 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 			m_ImageData[x + y * m_FinalImage->GetWidth()] = Utils::ConvertToRGBA(AccColor);
 		}
 	}
-
+#endif
 	m_FinalImage->SetData(m_ImageData);
 
 	if (m_Settings.Accumulate) {
