@@ -14,6 +14,28 @@ namespace Utils {
 		uint32_t result = (a << 24) | (b << 16) | (g << 8) | r;
 		return result;
 	}
+
+	static uint32_t PCG_Hash(uint32_t seed)
+	{
+		uint32_t state = seed * 747796405u + 2891336453u;
+		uint32_t word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+		return (word >> 22u) ^ word;
+	}
+
+	static float RandomFloatPCG(uint32_t& seed)
+	{
+		seed = PCG_Hash(seed);
+		return (float)seed / (float)UINT32_MAX;
+	}
+
+	static glm::vec3 InUnitSphere(uint32_t& seed)
+	{
+		return glm::normalize(glm::vec3(
+			RandomFloatPCG(seed) * 2.0f - 1.0f,
+			RandomFloatPCG(seed) * 2.0f - 1.0f,
+			RandomFloatPCG(seed) * 2.0f - 1.0f)
+		);
+	}
 }
 
 void Renderer::OnResize(uint32_t width, uint32_t height) {
@@ -59,15 +81,15 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 	std::for_each(std::execution::par, m_ImageVerticalIter.begin(), m_ImageVerticalIter.end(),
 		[this](uint32_t y) {
 			std::for_each(std::execution::par, m_ImageHorizontalIter.begin(), m_ImageHorizontalIter.end(),
-				[this, y](uint32_t x) {
+			[this, y](uint32_t x) {
 					glm::vec4 color = PerPixel(x, y);
-					m_AccData[x + y * m_FinalImage->GetWidth()] += color;
+	m_AccData[x + y * m_FinalImage->GetWidth()] += color;
 
-					glm::vec4 AccColor = m_AccData[x + y * m_FinalImage->GetWidth()];
-					AccColor /= (float)m_FrameIndex;
+	glm::vec4 AccColor = m_AccData[x + y * m_FinalImage->GetWidth()];
+	AccColor /= (float)m_FrameIndex;
 
-					AccColor = glm::clamp(AccColor, glm::vec4(0.0f), glm::vec4(1.0f));
-					m_ImageData[x + y * m_FinalImage->GetWidth()] = Utils::ConvertToRGBA(AccColor);
+	AccColor = glm::clamp(AccColor, glm::vec4(0.0f), glm::vec4(1.0f));
+	m_ImageData[x + y * m_FinalImage->GetWidth()] = Utils::ConvertToRGBA(AccColor);
 				});
 		});
 #else
@@ -148,11 +170,15 @@ glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
 
 	glm::vec3 light(0.0f);
 	glm::vec3 absorption(1.0f);
+	uint32_t seed = x + y * m_FinalImage->GetWidth();
+	seed *= m_FrameIndex;
 
 
 	int bounces = 5;
 	for (int i = 0; i < bounces; i++)
 	{
+		seed += i;
+
 		Renderer::HitPayload payload = TraceRay(ray);
 		if (payload.HitDistance < 0.0f)
 		{
@@ -168,9 +194,8 @@ glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
 		absorption *= material.Albedo;
 
 		ray.Origin = payload.WorldPosition + payload.WorldNormal * 0.0001f;
-		/*ray.Direction = glm::reflect(ray.Direction,
-			payload.WorldNormal + material.Roughness * Walnut::Random::Vec3(-0.5f, 0.5f));*/
-		ray.Direction = glm::normalize(payload.WorldNormal + Walnut::Random::InUnitSphere());
+
+		ray.Direction = glm::normalize(payload.WorldNormal + Utils::InUnitSphere(seed));
 	}
 
 	return glm::vec4(light, 1.0f);
